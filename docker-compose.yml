@@ -1,0 +1,248 @@
+version: '3.8'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bespoken — full-stack docker-compose
+#
+# Starts the entire platform: PostgreSQL, Redis, all 5 NestJS microservices,
+# the API Gateway, and the React frontend served by nginx.
+#
+# Prerequisites:
+#   cp .env.example .env   # and fill in the secrets
+#   docker compose up --build
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: bespoken_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-bespoken}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_DB: bespoken_db
+    ports:
+      - "${DB_PORT_EXPOSE:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-multiple-dbs.sql:/docker-entrypoint-initdb.d/01-init-multiple-dbs.sql
+    networks:
+      - bespoken_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-bespoken}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: bespoken_redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT_EXPOSE:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - bespoken_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend Microservices ────────────────────────────────────────────────────
+
+  users:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      args:
+        SERVICE: users
+    image: bespoken/users:latest
+    container_name: bespoken_users
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      USERS_PORT: 3301
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-bespoken}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_NAME: bespoken_users
+      DB_SYNC: "false"
+      DB_RUN_MIGRATIONS: "true"
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
+      JWT_REFRESH_TTL_SECONDS: ${JWT_REFRESH_TTL_SECONDS:-1209600}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bespoken_network
+
+  catalog:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      args:
+        SERVICE: catalog
+    image: bespoken/catalog:latest
+    container_name: bespoken_catalog
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      CATALOG_PORT: 3302
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-bespoken}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_NAME: bespoken_catalog
+      DB_SYNC: "false"
+      DB_RUN_MIGRATIONS: "true"
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bespoken_network
+
+  formulation:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      args:
+        SERVICE: formulation
+    image: bespoken/formulation:latest
+    container_name: bespoken_formulation
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      FORMULATION_PORT: 3303
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-bespoken}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_NAME: bespoken_formulation
+      DB_SYNC: "false"
+      DB_RUN_MIGRATIONS: "true"
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bespoken_network
+
+  cart:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      args:
+        SERVICE: cart
+    image: bespoken/cart:latest
+    container_name: bespoken_cart
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      CART_PORT: 3304
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-bespoken}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_NAME: bespoken_cart
+      DB_SYNC: "false"
+      DB_RUN_MIGRATIONS: "true"
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bespoken_network
+
+  orders:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      args:
+        SERVICE: orders
+    image: bespoken/orders:latest
+    container_name: bespoken_orders
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      ORDERS_PORT: 3305
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-bespoken}
+      DB_PASSWORD: ${DB_PASSWORD:-password}
+      DB_NAME: bespoken_orders
+      DB_SYNC: "false"
+      DB_RUN_MIGRATIONS: "true"
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - bespoken_network
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      args:
+        SERVICE: api-gateway
+    image: bespoken/api-gateway:latest
+    container_name: bespoken_api_gateway
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_GATEWAY_PORT: 3300
+      USERS_SERVICE_URL: http://users:3301
+      CATALOG_SERVICE_URL: http://catalog:3302
+      FORMULATION_SERVICE_URL: http://formulation:3303
+      CART_SERVICE_URL: http://cart:3304
+      ORDERS_SERVICE_URL: http://orders:3305
+      CORS_ORIGINS: ${CORS_ORIGINS}
+    ports:
+      - "3300:3300"
+    depends_on:
+      - users
+      - catalog
+      - formulation
+      - cart
+      - orders
+    networks:
+      - bespoken_network
+
+  # ── Frontend ─────────────────────────────────────────────────────────────────
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:3300}
+    image: bespoken/frontend:latest
+    container_name: bespoken_frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - api-gateway
+    networks:
+      - bespoken_network
+
+# ── Volumes & Networks ────────────────────────────────────────────────────────
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  bespoken_network:
+    driver: bridge
