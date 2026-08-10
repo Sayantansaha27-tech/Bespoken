@@ -396,8 +396,8 @@ Bespoken-Github/
 ### 1. Clone and configure
 
 ```bash
-git clone https://github.com/your-org/bespoken.git
-cd bespoken
+git clone https://github.com/Sayantansaha27-tech/Bespoken.git
+cd Bespoken
 
 cp .env.example .env
 # Open .env and replace all placeholder values
