@@ -4,6 +4,15 @@
 
 Bespoken is a full-stack luxury skincare platform that combines scroll-driven cinematic storytelling with a clinical skin analysis engine and a bespoke serum formulation service. Every product is formulated on-demand based on a user's unique skin biometric profile.
 
+**Status:** Architecture and design documentation. The implementation is not published
+in this repository.
+
+Bespoken was built as five NestJS microservices behind a thin API gateway, with a React
+frontend and five isolated databases inside one Postgres instance. What follows documents
+the architecture and the reasoning behind each decision. The container definitions and
+deployment topology in [`reference/`](reference/) record the service layout; they are not
+a runnable build, because the application source is not included.
+
 ---
 
 ## Table of Contents
@@ -15,8 +24,8 @@ Bespoken is a full-stack luxury skincare platform that combines scroll-driven ci
 5. [Auth Flow — JWT with Refresh Rotation](#auth-flow--jwt-with-refresh-token-rotation)
 6. [Tech Stack](#tech-stack)
 7. [Project Structure](#project-structure)
-8. [Quick Start with Docker](#quick-start-with-docker)
-9. [Local Development Setup](#local-development-setup)
+8. [Deployment Topology (Reference)](#deployment-topology-reference)
+9. [Development Setup (Reference)](#development-setup-reference)
 10. [Service Ports](#service-ports)
 11. [API Reference](#api-reference)
 12. [Database Schema Overview](#database-schema-overview)
@@ -386,69 +395,35 @@ Bespoken-Github/
 
 ---
 
-## Quick Start with Docker
+## Deployment Topology (Reference)
 
-### Prerequisites
+Nine services. The full Compose definition is in
+[`reference/docker-compose.yml`](reference/docker-compose.yml).
 
-- Docker 24+ and Docker Compose v2
-- No Node.js required locally
+| Service | Role | Port |
+|---|---|---|
+| `frontend` | Vite build served by nginx, `VITE_API_BASE_URL` baked in at build time | 80 |
+| `api-gateway` | Thin proxy: request id, CORS, passthrough auth | 3300 |
+| `users` | Identity, Argon2id hashing, refresh token rotation | internal |
+| `catalog` | Product data, read-heavy | internal |
+| `formulation` | Skin biometric profiles and ingredient recommendations | internal |
+| `cart` | Session-scoped, write-heavy | internal |
+| `orders` | Immutable append-only records | internal |
+| `postgres` | Postgres 15, five databases provisioned by `init-multiple-dbs.sql` | 5432 |
+| `redis` | Cache and session store | 6379 |
 
-### 1. Clone and configure
+Startup ordering was healthcheck-gated: Postgres had to report healthy before the five
+services started, each running its own TypeORM migrations on boot. Each service connects
+only to its own database by name, with no cross-service foreign keys, which is what makes
+the single-instance arrangement described in [Database Isolation Without the Operational
+Cost of Many Clusters](#database-isolation-without-the-operational-cost-of-many-clusters)
+work.
 
-```bash
-git clone https://github.com/Sayantansaha27-tech/Bespoken.git
-cd Bespoken
+## Development Setup (Reference)
 
-cp .env.example .env
-# Open .env and replace all placeholder values
-# At minimum, set strong values for:
-#   DB_PASSWORD, JWT_ACCESS_SECRET, JWT_REFRESH_SECRET
-```
-
-### 2. Start the full stack
-
-```bash
-docker compose up --build
-```
-
-This will:
-- Start PostgreSQL and wait for it to be healthy
-- Create all 5 databases via the init script
-- Build and start all 5 NestJS microservices (each runs its own TypeORM migrations on startup)
-- Build and start the API Gateway
-- Build the Vite frontend and serve it via nginx
-
-### 3. Open the app
-
-| Service | URL |
-|---|---|
-| Frontend | http://localhost |
-| API Gateway | http://localhost:3300 |
-| PostgreSQL | localhost:5432 (configurable via `DB_PORT_EXPOSE`) |
-| Redis | localhost:6379 (configurable via `REDIS_PORT_EXPOSE`) |
-
-### Useful compose commands
-
-```bash
-# View logs for all services
-docker compose logs -f
-
-# View logs for a specific service
-docker compose logs -f api-gateway
-
-# Restart a single service after code change
-docker compose up --build users
-
-# Stop everything and remove volumes (destructive — clears the database)
-docker compose down -v
-
-# Stop everything but keep volumes (data persists)
-docker compose down
-```
-
----
-
-## Local Development Setup
+The commands below are recorded as they were run against the application source tree,
+which is not published here. They document the toolchain and service layout rather than
+offering a working setup.
 
 For active development you will want hot-reload. Run the infrastructure via Docker and the services locally.
 
